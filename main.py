@@ -1,3 +1,4 @@
+import os
 import tkinter as tk
 from tkinter import filedialog, ttk
 
@@ -5,6 +6,69 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 import read_signal_csv
+
+
+class Grid:
+    """Handles operations related to grids in the data."""
+
+    def __init__(self, grid_id, grid_dict):
+        self.grid_id = grid_id
+        self.grid_dict = grid_dict
+
+    def get_grid_dir(self):
+        """Get all directories related to the grid."""
+        return list(self.grid_dict.get(self.grid_id).keys())
+
+    def get_grid_event(self, dirs):
+        """Get all events in a directory."""
+        return list(self.grid_dict[self.grid_id][dirs].keys())
+
+    def extract_val(self, dirs, ev):
+        """Extract time and amplitude values for a specific event."""
+        t = self.grid_dict[self.grid_id][dirs][ev].get("time")
+        amp = self.grid_dict[self.grid_id][dirs][ev].get("amp")
+        return t, amp
+
+
+class Plot:
+    def __init__(self, master):
+        self.fig, self.ax = plt.subplots(2, 1)
+        self.canvas = FigureCanvasTkAgg(self.fig, master=master)
+        self.colors = {
+            i: color for i, color in enumerate(plt.get_cmap("tab10", 10).colors)
+        }
+
+    def grid(self):
+        self.canvas.get_tk_widget().grid(row=0, column=0, sticky="wsen")
+        self.canvas.draw()
+
+    def clear(self):
+        self.ax[0].cla()
+
+    def draw(self, data, x_label, y_label):
+        self.clear()
+        for i, (label, value) in enumerate(data.items()):
+            time, amplitude = value
+            self.ax[0].plot(time, amplitude, label=label, color=self.colors[i])
+
+        self.ax[0].set_xlabel(x_label)
+        self.ax[0].set_xlabel(y_label)
+        self.ax[0].legend()
+        self.canvas.draw()
+
+
+class DataSingelton:
+    _instance = None
+
+    cvm_data = {}
+    test_data = {}
+    sim_combine = {}
+    selected_sim_comb = ""
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(DataSingelton, cls).__new__(cls)
+        return cls._instance
 
 
 class ConvertSignalFrame(ttk.Frame):
@@ -27,7 +91,7 @@ class ReadSignalFrame(ttk.Frame):
         super().__init__(master)
         # -- Fields --
         self.grid_data = []
-
+        self.shared_data = DataSingelton()
 
         # Layout Config
         self.layout_config(self, rows=[(0, 1), (1, 100)], columns=[(0, 1)])
@@ -53,20 +117,18 @@ class ReadSignalFrame(ttk.Frame):
         ttk.Label(path_frame, text="R files folder path:").grid(row=0, column=0)
         self.r_path_entry = ttk.Entry(path_frame, textvariable=self.r_path_var)
         self.r_path_entry.grid(row=0, column=1)
-        ttk.Button(path_frame, text="Select Folder", command=self.select_folder).grid(
+        ttk.Button(path_frame, text="Select Folder", command=self.on_select_folder).grid(
             row=0, column=2
         )
 
         ttk.Label(path_frame, text="Test CSV path:").grid(row=1, column=0)
         self.test_path_entry = ttk.Entry(path_frame)
         self.test_path_entry.grid(row=1, column=1)
-        ttk.Button(path_frame, text="Select Folder", command=self.select_folder).grid(
+        ttk.Button(path_frame, text="Select Folder", command=self.on_select_folder).grid(
             row=1, column=2
         )
         # Applay to all childs
         self.apply_childs(path_frame, sticky="wsen", padx=5, pady=5)
-
-        ## -- Plot Frame --
 
         # Frames
         plot_left_frame = ttk.Frame(plot_frame, relief="sunken")
@@ -122,11 +184,9 @@ class ReadSignalFrame(ttk.Frame):
             command=self.on_select_all_events,
         ).grid(row=5, column=0)
 
-        ### Plot Middle Frame
-        self.fig, self.ax = plt.subplots(2, 1)
-        self.canvas = FigureCanvasTkAgg(self.fig, master=plot_middle_frame)
-        self.canvas.get_tk_widget().grid(row=0, column=0, sticky="wsen")
-        self.canvas.draw()
+        ## -- Plot Frame --
+        self.plot = Plot(plot_middle_frame)
+        self.plot.grid()
 
         ### Plot Right Frame
         # Widgets
@@ -158,7 +218,7 @@ class ReadSignalFrame(ttk.Frame):
             command=self.on_reorder_test_time,
         ).grid(row=4, column=0)
 
-    def select_folder(self):
+    def on_select_folder(self):
         path = filedialog.askdirectory()
         if not path:
             return
@@ -167,29 +227,74 @@ class ReadSignalFrame(ttk.Frame):
         self.r_path_var.set(path)
         rf = read_signal_csv.R_file(path)
         rf.check_all_dir()
-        daq, ev =rf.check_all_dir()
+        daq, ev = rf.check_all_dir()
         if not daq:
             self.daq_text_var.set(f"DAQ complete : No\nEvent {ev} missed")
         else:
             self.daq_text_var.set("DAQ complete : Yes")
 
-        # Display Data
-        # Clear Listboxes
-        self.grid_listbox.delete(0, tk.END)
-        self.direction_listbox.delete(0, tk.END)
-        self.event_listbox.delete(0, tk.END)
+        # Display Grid
+        self.clear_listbox(
+            self.grid_listbox, self.direction_listbox, self.event_listbox
+        )
         self.grid_data = []
 
+        initial_path = os.path.dirname(os.path.abspath(__file__))
+        rf = read_signal_csv.R_file(initial_path)
+        grids = rf.find_all_grid()
+        grid_tracks = rf.grid_track_dict(grids)
+        grid_dict = rf.convert_to_g(grid_tracks)
+
+        for grid_id in grids:
+            self.grid_data.append(Grid(grid_id, grid_dict))
+            self.grid_listbox.insert(tk.END, f"Grid ID: {grid_id}")
+
+
+    def get_selected_grid(self):
+        selection = self.grid_listbox.curselection()
+        if selection:
+            return self.grid_data[selection[0]]
     
+    def get_selected_direction(self):
+        selection = self.direction_listbox.curselection()
+        if selection:
+            grid = self.get_selected_grid()
+            direction = grid.get_grid_dir()[selection[0]]
+            return direction
+
+    def get_selected_events(self, indices, grid, direction):
+        selected_events = [grid.get_grid_event(direction)[i] for i in indices]
+        events = {i: grid.extract_val(direction, i) for i in selected_events}
+        return events
+    
+    def modify_cvm_data(self, grid, direction, events):
+        self.shared_data.cvm_data = {"grid": {grid.grid_id: {direction: events}}}
+
+    def clear_insert_listbox(self, listbox, data):
+        self.clear_listbox(listbox)
+        self.insert_listbox(listbox, data)
 
     def on_grid_select(self, event):
-        pass
+        grid = self.get_selected_grid()
+        if grid:
+            directions = grid.get_grid_dir()
+            self.clear_insert_listbox(self.direction_listbox, directions)
 
     def on_direction_select(self, event):
-        pass
+        grid = self.get_selected_grid()
+        direction = self.get_selected_direction()
+        if grid and direction is not None:
+            events = grid.get_grid_event(direction)
+            self.clear_insert_listbox(self.event_listbox, events)
 
     def on_event_select(self, event):
-        pass
+        grid = self.get_selected_grid()
+        direction = self.get_selected_direction()
+        if grid and direction is not None:
+            indices = self.event_listbox.curselection()
+            events = self.get_selected_events(indices, grid, direction)
+            self.modify_cvm_data(grid, direction, events)
+            self.plot.draw(events, "Time", "Amplitude")
 
     def on_select_all_events(self):
         pass
@@ -214,9 +319,21 @@ class ReadSignalFrame(ttk.Frame):
         for child in parent.winfo_children():
             child.grid_configure(**kwargs)
 
-    def get_directory(self):
-        path = filedialog.askdirectory()
-        return path if path else ""
+    def insert_listbox(self, listbox, items):
+        for item in items:
+            listbox.insert(tk.END, item)
+
+    def clear_listbox(self, *listboxes):
+        for listbox in listboxes:
+            listbox.delete(0, tk.END)
+    
+    def get_selection_index(self, listbox):
+        pass
+
+   
+    
+
+
 
 
 class MainFrame(ttk.Frame):
