@@ -46,14 +46,20 @@ class Plot:
         self.ax[0].cla()
 
     def draw(self, data, x_label, y_label):
+        has_label = False
         self.clear()
         for i, (label, value) in enumerate(data.items()):
             time, amplitude = value
-            self.ax[0].plot(time, amplitude, label=label, color=self.colors[i])
+            if label and not label.startswith('_'):
+                self.ax[0].plot(time, amplitude, label=label, color=self.colors[i])
+                has_label = True
+            else:
+                self.ax[0].plot(time, amplitude, color=self.colors[i])
 
         self.ax[0].set_xlabel(x_label)
         self.ax[0].set_xlabel(y_label)
-        self.ax[0].legend()
+        if has_label:
+            self.ax[0].legend()
         self.canvas.draw()
 
 
@@ -117,14 +123,15 @@ class ReadSignalFrame(ttk.Frame):
         ttk.Label(path_frame, text="R files folder path:").grid(row=0, column=0)
         self.r_path_entry = ttk.Entry(path_frame, textvariable=self.r_path_var)
         self.r_path_entry.grid(row=0, column=1)
-        ttk.Button(path_frame, text="Select Folder", command=self.on_select_folder).grid(
+        ttk.Button(path_frame, text="Select R Files Folder", command=self.on_select_folder).grid(
             row=0, column=2
         )
 
+        self.test_path_var = tk.StringVar()
         ttk.Label(path_frame, text="Test CSV path:").grid(row=1, column=0)
-        self.test_path_entry = ttk.Entry(path_frame)
+        self.test_path_entry = ttk.Entry(path_frame, textvariable=self.test_path_var)
         self.test_path_entry.grid(row=1, column=1)
-        ttk.Button(path_frame, text="Select Folder", command=self.on_select_folder).grid(
+        ttk.Button(path_frame, text="Select Test File", command=self.on_select_test_file).grid(
             row=1, column=2
         )
         # Applay to all childs
@@ -249,30 +256,11 @@ class ReadSignalFrame(ttk.Frame):
             self.grid_data.append(Grid(grid_id, grid_dict))
             self.grid_listbox.insert(tk.END, f"Grid ID: {grid_id}")
 
-
-    def get_selected_grid(self):
-        selection = self.grid_listbox.curselection()
-        if selection:
-            return self.grid_data[selection[0]]
-    
-    def get_selected_direction(self):
-        selection = self.direction_listbox.curselection()
-        if selection:
-            grid = self.get_selected_grid()
-            direction = grid.get_grid_dir()[selection[0]]
-            return direction
-
-    def get_selected_events(self, indices, grid, direction):
-        selected_events = [grid.get_grid_event(direction)[i] for i in indices]
-        events = {i: grid.extract_val(direction, i) for i in selected_events}
-        return events
-    
-    def modify_cvm_data(self, grid, direction, events):
-        self.shared_data.cvm_data = {"grid": {grid.grid_id: {direction: events}}}
-
-    def clear_insert_listbox(self, listbox, data):
-        self.clear_listbox(listbox)
-        self.insert_listbox(listbox, data)
+    def on_select_test_file(self):
+        filepath = self.ask_open_csv()
+        if filepath:
+            self.test_path_var.set("")
+            self.test_path_var.set(filepath)
 
     def on_grid_select(self, event):
         grid = self.get_selected_grid()
@@ -295,17 +283,30 @@ class ReadSignalFrame(ttk.Frame):
             events = self.get_selected_events(indices, grid, direction)
             self.modify_cvm_data(grid, direction, events)
             self.plot.draw(events, "Time", "Amplitude")
+        self.select_all_events_var.set(False)
 
     def on_select_all_events(self):
-        pass
-
-    def on_reorder_test_time(self):
-        pass
+        if self.select_all_events_var.get():
+            self.event_listbox.select_set(0, tk.END)
+            grid = self.get_selected_grid()
+            direction = self.get_selected_direction()
+            if grid and direction is not None:
+                indices = self.event_listbox.curselection()
+                events = self.get_selected_events(indices, grid, direction)
+                self.modify_cvm_data(grid, direction, events)
+                self.plot.draw(events, "Time", "Amplitude")
+        else:
+            self.event_listbox.select_clear(0, tk.END)
+            self.shared_data.cvm_data = {}
+            self.plot.draw({}, "", "")
 
     def on_test_select(self, event):
         pass
 
     def on_testfile_select(self, event):
+        pass
+
+    def on_reorder_test_time(self):
         pass
 
     def layout_config(self, parent, rows=[], columns=[]):
@@ -326,10 +327,39 @@ class ReadSignalFrame(ttk.Frame):
     def clear_listbox(self, *listboxes):
         for listbox in listboxes:
             listbox.delete(0, tk.END)
-    
-    def get_selection_index(self, listbox):
-        pass
 
+    def clear_insert_listbox(self, listbox, data):
+        self.clear_listbox(listbox)
+        self.insert_listbox(listbox, data)
+    
+    def ask_open_csv(self):
+        filepath = filedialog.askopenfilename(
+            title="Select a CSV file",
+            filetypes=[("CSV files", "*.csv")],
+            multiple=False,
+        )
+        return filepath
+
+    def get_selected_grid(self):
+        selection = self.grid_listbox.curselection()
+        if selection:
+            return self.grid_data[selection[0]]
+    
+    def get_selected_direction(self):
+        selection = self.direction_listbox.curselection()
+        if selection:
+            grid = self.get_selected_grid()
+            direction = grid.get_grid_dir()[selection[0]]
+            return direction
+
+    def get_selected_events(self, indices, grid, direction):
+        selected_events = [grid.get_grid_event(direction)[i] for i in indices]
+        events = {i: grid.extract_val(direction, i) for i in selected_events}
+        return events
+    
+    def modify_cvm_data(self, grid, direction, events):
+        self.shared_data.cvm_data = {"grid": {grid.grid_id: {direction: events}}}
+    
    
     
 

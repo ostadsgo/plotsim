@@ -356,9 +356,7 @@ class ReadSignalFrame(ttk.Frame):
 
     def reorder_csv_time(self):
         selected_index = self.listbox_csv_file.curselection()[0]
-        selected_csv = self.csv_file[selected_index][
-            0
-        ]  # self.csv_fie contain (file_name complete, basename file_name)
+        selected_csv = self.csv_file[selected_index][0]  # self.csv_fie contain (file_name complete, basename file_name)
         if self.reorder_var.get():
             if self.csv_point:
                 for i in self.csv_point:
